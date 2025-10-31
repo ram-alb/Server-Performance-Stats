@@ -1,99 +1,159 @@
 #!/bin/bash
 
-#---------------------------------------------------
-# Show help to user.
-#---------------------------------------------------
+set -euo pipefail
+# IFS=$'\n\t'
+
+
+# ========== CONSTANTS & COLORS ==========
+
+readonly SCRIPT_NAME=$(basename "$0")
+readonly VERSION="0.1.0"
+
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[1;33m"
+RESET="\033[0m"
+
+# disable colors if output not to terminal
+if [[ ! -t 1 ]]; then
+    RED=""; GREEN=""; YELLOW=""; RESET="";
+fi
+
+
+# ========== UTILS ==========
+
 show_help() {
-    echo "CPU Usage Monitor"
-    echo
-    echo "Usage:"
-    echo "  $0 [THRESHOLD] [INTERVAL]"
-    echo
-    echo "Arguments:"
-    echo "  THRESHOLD   Warning threshold in %, default: 70"
-    echo "  INTERVAL    Measurement interval in seconds, default: 2"
-    echo "  --help      Show this help message"
-    exit 0
+    cat <<EOF
+$SCRIPT_NAME v$VERSION
+--------------------------------------------
+Usage:
+  $SCRIPT_NAME [CPU_THRESHOLD] [INTERVAL] [MEM_THRESHOLD]
+
+Description:
+  Monitors system resource usage in real time.
+  Calculates CPU usage over a time interval and
+  displays current memory utilization.
+
+Arguments:
+  CPU_THRESHOLD   Warning threshold for CPU usage (0–100). Default: 70
+  INTERVAL        CPU measurement interval in seconds. Default: 2
+  MEM_THRESHOLD   Warning threshold for memory usage (0–100). Default: 80
+
+Options:
+  --help          Show this help message and exit
+  --version       Show script version
+
+Examples:
+  $SCRIPT_NAME
+  $SCRIPT_NAME 75 3
+  $SCRIPT_NAME 90 2 85
+EOF
 }
 
 
-#---------------------------------------------------
-# Validate that argument is a number
-#---------------------------------------------------
 is_number() {
     [[ "$1" =~ ^[0-9]+$ ]]
 }
 
 
-#---------------------------------------------------
-# Read raw CPU statistics from /proc/stat.
-# Returns:
-#   echo "<idle> <total>"
-#---------------------------------------------------
+get_color_for_usage() {
+    local usage=$1
+    local threshold=$2
+
+    if (( usage >= threshold )); then
+        echo "$RED"
+    elif (( usage >= threshold - 20 )); then
+        echo "$YELLOW"
+    else
+        echo "$GREEN"
+    fi
+}
+
+
+# ========== CPU MONITORING ==========
+
 get_cpu_data() {
-    idle_col=4
-    iowait_col=5
+    local cpu=($(grep '^cpu ' /proc/stat))
 
-    CPU=($(grep '^cpu ' /proc/stat))
+    local idle=${cpu[4]}
+    local iowait=${cpu[5]}
+    local total_idle=$((idle + iowait))
 
-    idle=${CPU[$idle_col]}
-    iowait=${CPU[$iowait_col]}
-
-    total_idle=$((idle + iowait))
-
-    total_cpu=0
-
-    for (( i=1; i<${#CPU[@]}; i++ )); do
-        total_cpu=$((total_cpu + CPU[i]))
+    local total_cpu=0
+    for ((i=1; i<${#cpu[@]}; i++)); do
+        total_cpu=$((total_cpu + cpu[i]))
     done
 
-    echo $total_idle $total_cpu
+    echo "$total_idle $total_cpu"
 }
 
 
-#---------------------------------------------------
-# Calculate CPU usage percentage over interval.
-# Arguments:
-#   $1 - warning threshold (default: 70)
-#   $2 - measurement interval (default: 2 seconds)
-#---------------------------------------------------
 get_cpu_usage() {
-    threshold=${1:-70}
-    interval=${2:-2}
+    local threshold=${1:-70}
+    local interval=${2:-2}
 
-    if ! is_number "$threshold" || (( threshold < 0 || threshold > 100 )); then
-        echo "Error: Threshold must be a number between 0 and 100."
-        exit 1
-    fi
+    read idle1 total1 <<< "$(get_cpu_data)"
+    sleep "$interval"
+    read idle2 total2 <<< "$(get_cpu_data)"
 
-    if ! is_number "$interval" || (( interval <= 0 )); then
-        echo "Error: Interval must be a positive number."
-        exit 1
-    fi
-    
-    read idle1 total1 <<< $(get_cpu_data)
-    sleep $interval
-    read idle2 total2 <<< $(get_cpu_data)
+    local total_diff=$((total2 - total1))
+    (( total_diff == 0 )) && { echo "CPU usage:\n Usage: 0%"; return; }
 
-    total_diff=$((total2 - total1))
-    if (( total_diff == 0 )); then
-        echo "CPU usage: 0%"
-        return
-    fi
+    local idle_diff=$((idle2-idle1))
+    local usage=$(( (100 * (total_diff - idle_diff)) / total_diff ))
 
-    idle_diff=$((idle2 - idle1))
-    cpu_usage=$(( (100 * (total_diff - idle_diff)) / total_diff ))
+    local color
+    color=$(get_color_for_usage "$usage" "$threshold")
 
-    if (( cpu_usage >= threshold )); then
-        echo -e "CPU usage: \e[31m${cpu_usage}%\e[0m (HIGH)"
-    else
-        echo -e "CPU usage: \e[32m${cpu_usage}%\e[0m"
-    fi
+    printf "CPU usage:\n"
+    printf "  Interval: %2ds\n" "$interval"
+    printf "  Usage: ${color}%3d%%${RESET} (threshold: %d%%)\n" "$usage" "$threshold"
 }
 
 
-if [[ "$1" == "--help" ]]; then
-    show_help
-fi
+# ========== MEMORY MONITORING ==========
 
-get_cpu_usage "$1" "$2"
+get_memory_usage() {
+    local mem_file="/proc/meminfo"
+    local threshold=${1:-80}
+
+    local mem_total=$(grep 'MemTotal' "$mem_file" | awk '{print $2}')
+    local mem_available=$(grep 'MemAvailable' "$mem_file" | awk '{print $2}')
+
+    local mem_used=$((mem_total-mem_available))
+    local mem_total_mb=$((mem_total / 1024))
+    local mem_free_mb=$((mem_available / 1024))
+    local mem_used_mb=$((mem_used / 1024))
+    local mem_usage=$((100 * mem_used_mb / mem_total_mb))
+
+    local color
+    color=$(get_color_for_usage "$mem_usage" "$threshold")
+
+    printf "Memory usage:\n"
+    printf "  Total: %6d MB\n" "$mem_total_mb"
+    printf "  Free : %6d MB\n" "$mem_free_mb"
+    printf "  Used : %6d MB\n" "$mem_used_mb"
+    printf "  Usage: ${color}%3d%%${RESET} (threshold: %d%%)\n" "$mem_usage" "$threshold"
+}
+
+
+# ========== MAIN LOGIC ==========
+
+main() {
+    case "${1:-}" in
+        --help) show_help; exit 0 ;;
+        --version) echo "$SCRIPT_NAME v$VERSION"; exit 0 ;;
+    esac
+
+    local cpu_threshold=${1:-70}
+    local interval=${2:-2}
+    local mem_threshold=${3:-80}
+
+    echo
+    get_cpu_usage "$cpu_threshold" "$interval"
+    echo
+    get_memory_usage "$mem_threshold"
+    echo
+}
+
+main "$@"
