@@ -27,7 +27,8 @@ show_help() {
 $SCRIPT_NAME v$VERSION
 --------------------------------------------
 Usage:
-  $SCRIPT_NAME [CPU_THRESHOLD] [INTERVAL] [MEM_THRESHOLD]
+  $SCRIPT_NAME [CPU_THRESHOLD] [INTERVAL] [MEM_THRESHOLD] [DISK_THRESHOLD] [PATH]
+
 
 Description:
   Monitors system resource usage in real time.
@@ -38,6 +39,8 @@ Arguments:
   CPU_THRESHOLD   Warning threshold for CPU usage (0–100). Default: 70
   INTERVAL        CPU measurement interval in seconds. Default: 2
   MEM_THRESHOLD   Warning threshold for memory usage (0–100). Default: 80
+  DISK_THRESHOLD  Warning threshold for disk usage (0-100). Default: 80
+  PATH            PATH for checking disk usage. Default: /
 
 Options:
   --help          Show this help message and exit
@@ -47,6 +50,8 @@ Examples:
   $SCRIPT_NAME
   $SCRIPT_NAME 75 3
   $SCRIPT_NAME 90 2 85
+  $SCRIPT_NAME 90 2 85 90 /home
+
 EOF
 }
 
@@ -69,6 +74,15 @@ get_color_for_usage() {
     fi
 }
 
+
+check_cmd() {
+    for cmd in awk df grep; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "${RED}Error:${RESET} required command '$cmd' not found."
+            exit 1
+        fi
+    done
+}
 
 # ========== CPU MONITORING ==========
 
@@ -124,7 +138,12 @@ get_memory_usage() {
     local mem_total_mb=$((mem_total / 1024))
     local mem_free_mb=$((mem_available / 1024))
     local mem_used_mb=$((mem_used / 1024))
-    local mem_usage=$((100 * mem_used_mb / mem_total_mb))
+
+    if (( mem_total_mb > 0 )); then
+        mem_usage=$((100 * mem_used_mb / mem_total_mb))
+    else
+        mem_usage=0
+    fi
 
     local color
     color=$(get_color_for_usage "$mem_usage" "$threshold")
@@ -137,6 +156,35 @@ get_memory_usage() {
 }
 
 
+# ========== DISK MONITORING ==========
+
+get_disk_usage() {
+    local threshold=${1:-80}
+    local path=${2:-/}
+
+    if ! output=$(df -P "$path" 2>/dev/null | tail -1); then
+        echo -e "${RED}Error:${RESET} path '$path' not found or inaccessible."
+        return 1
+    fi
+
+    read _ size used avail pcent mount <<< "$output"
+    pcent=${pcent%\%}
+
+    local total_gb=$((size / 1024 / 1024))
+    local used_gb=$((used / 1024 / 1024))
+    local avail_gb=$((avail / 1024 / 1024))
+
+    local color
+    color=$(get_color_for_usage "$pcent" "$threshold")
+
+    printf "Disk usage (%s):\n" "$mount"
+    printf "  Total: %6d GB\n" "$total_gb"
+    printf "  Used : %6d GB\n" "$used_gb"
+    printf "  Free : %6d GB\n" "$avail_gb"
+    printf "  Usage: ${color}%3d%%${RESET} (threshold: %d%%)\n" "$pcent" "$threshold"
+}
+
+
 # ========== MAIN LOGIC ==========
 
 main() {
@@ -145,14 +193,22 @@ main() {
         --version) echo "$SCRIPT_NAME v$VERSION"; exit 0 ;;
     esac
 
+    check_cmd
+
     local cpu_threshold=${1:-70}
     local interval=${2:-2}
+
     local mem_threshold=${3:-80}
+
+    local disk_threshold=${4:-80}
+    local path=${5:-/}
 
     echo
     get_cpu_usage "$cpu_threshold" "$interval"
     echo
     get_memory_usage "$mem_threshold"
+    echo
+    get_disk_usage "$disk_threshold" "$path"
     echo
 }
 
