@@ -27,20 +27,22 @@ show_help() {
 $SCRIPT_NAME v$VERSION
 --------------------------------------------
 Usage:
-  $SCRIPT_NAME [CPU_THRESHOLD] [INTERVAL] [MEM_THRESHOLD] [DISK_THRESHOLD] [PATH]
+  $SCRIPT_NAME [CPU_THRESHOLD] [CPU_INTERVAL] [MEM_THRESHOLD] [DISK_THRESHOLD] [DISK_PATH] [TOP_CPU_PROCESSES]
 
 
 Description:
-  Monitors system resource usage in real time.
-  Calculates CPU usage over a time interval and
-  displays current memory utilization.
+  Monitors system resource usage: CPU, memory and disk utilization.
+  Calculates CPU usage as the difference over a time interval.
+  Displays memory and disk consumption and highlights values that exceed thresholds.
+  Also shows top N processes by CPU usage.
 
 Arguments:
-  CPU_THRESHOLD   Warning threshold for CPU usage (0–100). Default: 70
-  INTERVAL        CPU measurement interval in seconds. Default: 2
-  MEM_THRESHOLD   Warning threshold for memory usage (0–100). Default: 80
-  DISK_THRESHOLD  Warning threshold for disk usage (0-100). Default: 80
-  PATH            PATH for checking disk usage. Default: /
+  CPU_THRESHOLD       Warning threshold for CPU usage (0–100). Default: 70
+  CPU_INTERVAL        CPU measurement interval in seconds. Default: 2
+  MEM_THRESHOLD       Warning threshold for memory usage (0–100). Default: 80
+  DISK_THRESHOLD      Warning threshold for disk usage (0-100). Default: 80
+  DISK_PATH           PATH for checking disk usage. Default: /
+  TOP_CPU_PROCESSES   Top Processes number by CPU usage. Default: 5
 
 Options:
   --help          Show this help message and exit
@@ -51,6 +53,7 @@ Examples:
   $SCRIPT_NAME 75 3
   $SCRIPT_NAME 90 2 85
   $SCRIPT_NAME 90 2 85 90 /home
+  $SCRIPT_NAME 90 2 85 90 /home 5
 
 EOF
 }
@@ -139,6 +142,7 @@ get_memory_usage() {
     local mem_free_mb=$((mem_available / 1024))
     local mem_used_mb=$((mem_used / 1024))
 
+    local mem_usage
     if (( mem_total_mb > 0 )); then
         mem_usage=$((100 * mem_used_mb / mem_total_mb))
     else
@@ -185,6 +189,20 @@ get_disk_usage() {
 }
 
 
+# ========== TOP PROCESSES BY CPU USAGE ==========
+
+get_processes_by_cpu_usage() {
+    local processes_num=${1:-5}
+    local lines=$((processes_num + 1))  # add one line for header
+
+    local processes
+    processes=$(ps -eo pid,comm,pcpu --sort=-pcpu | head -n "$lines")
+
+    printf "Top %d processes by CPU usage:\n" "$processes_num"
+    printf "%s\n" "$processes"
+}
+
+
 # ========== MAIN LOGIC ==========
 
 main() {
@@ -196,19 +214,23 @@ main() {
     check_cmd
 
     local cpu_threshold=${1:-70}
-    local interval=${2:-2}
+    local cpu_interval=${2:-2}
 
     local mem_threshold=${3:-80}
 
     local disk_threshold=${4:-80}
-    local path=${5:-/}
+    local disk_path=${5:-/}
+
+    local top_cpu_processes=${6:-5}
 
     echo
-    get_cpu_usage "$cpu_threshold" "$interval"
+    get_cpu_usage "$cpu_threshold" "$cpu_interval"
     echo
     get_memory_usage "$mem_threshold"
     echo
-    get_disk_usage "$disk_threshold" "$path"
+    get_disk_usage "$disk_threshold" "$disk_path"
+    echo
+    get_processes_by_cpu_usage "$top_cpu_processes"
     echo
 }
 
