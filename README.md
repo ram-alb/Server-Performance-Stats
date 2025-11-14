@@ -146,3 +146,8 @@ MIT License - feel free to use and modify as needed.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Acknowledgments
+
+- Inspired by roadmap.sh platform
+- https://roadmap.sh/projects/server-stats
