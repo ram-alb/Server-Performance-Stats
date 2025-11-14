@@ -27,34 +27,43 @@ show_help() {
 $SCRIPT_NAME v$VERSION
 --------------------------------------------
 Usage:
-  $SCRIPT_NAME [CPU_THRESHOLD] [CPU_INTERVAL] [MEM_THRESHOLD] [DISK_THRESHOLD] [DISK_PATH] [TOP_CPU_PROCESSES]
-
+  $SCRIPT_NAME [CPU_THRESHOLD] [CPU_INTERVAL] [MEM_THRESHOLD] [DISK_THRESHOLD] [DISK_PATH] [TOP_CPU_PROCESSES] [TOP_MEM_PROCESSES]
 
 Description:
-  Monitors system resource usage: CPU, memory and disk utilization.
-  Calculates CPU usage as the difference over a time interval.
-  Displays memory and disk consumption and highlights values that exceed thresholds.
-  Also shows top N processes by CPU usage.
+  Monitors system resource usage: CPU, memory, disk usage,
+  and top processes by CPU and memory consumption.
+
+  CPU usage is calculated as the difference over a specified time interval.
+  Memory and disk usage are read directly from /proc and df.
+
+  The script can also display the top N processes sorted by:
+    - CPU usage
+    - memory usage (RSS)
+
+  Thresholds are used to highlight high usage values.
 
 Arguments:
-  CPU_THRESHOLD       Warning threshold for CPU usage (0–100). Default: 70
-  CPU_INTERVAL        CPU measurement interval in seconds. Default: 2
-  MEM_THRESHOLD       Warning threshold for memory usage (0–100). Default: 80
-  DISK_THRESHOLD      Warning threshold for disk usage (0-100). Default: 80
-  DISK_PATH           PATH for checking disk usage. Default: /
-  TOP_CPU_PROCESSES   Top Processes number by CPU usage. Default: 5
+  CPU_THRESHOLD         Warning threshold for CPU usage (0–100). Default: 70
+  CPU_INTERVAL          CPU measurement interval in seconds. Default: 2
+
+  MEM_THRESHOLD         Warning threshold for memory usage (0–100). Default: 80
+
+  DISK_THRESHOLD        Warning threshold for disk usage (0–100). Default: 80
+  DISK_PATH             Filesystem path to check disk usage for. Default: /
+
+  TOP_CPU_PROCESSES     Number of top processes by CPU usage. Default: 5
+  TOP_MEM_PROCESSES     Number of top processes by memory usage. Default: 5
 
 Options:
-  --help          Show this help message and exit
-  --version       Show script version
+  --help                Show this help message and exit
+  --version             Show script version
 
 Examples:
   $SCRIPT_NAME
   $SCRIPT_NAME 75 3
   $SCRIPT_NAME 90 2 85
   $SCRIPT_NAME 90 2 85 90 /home
-  $SCRIPT_NAME 90 2 85 90 /home 5
-
+  $SCRIPT_NAME 90 2 85 90 /home 10 5
 EOF
 }
 
@@ -203,6 +212,19 @@ get_processes_by_cpu_usage() {
 }
 
 
+# ========== TOP PROCESSES BY MEMORY USAGE ==========
+
+get_processes_by_mem_usage() {
+    local processes_num=${1:-5}
+
+    printf "Top %d processes by memory usage:\n" "$processes_num"
+
+    ps -eo pid,comm,rss --sort=-rss --no-headers \
+        | head -n "$processes_num" \
+        | awk '{ printf "  %-6s %-20s %8.1f MB\n", $1, $2, $3/1024 }'
+}
+
+
 # ========== MAIN LOGIC ==========
 
 main() {
@@ -222,6 +244,7 @@ main() {
     local disk_path=${5:-/}
 
     local top_cpu_processes=${6:-5}
+    local top_memory_processes=${7:-5}
 
     echo
     get_cpu_usage "$cpu_threshold" "$cpu_interval"
@@ -231,6 +254,8 @@ main() {
     get_disk_usage "$disk_threshold" "$disk_path"
     echo
     get_processes_by_cpu_usage "$top_cpu_processes"
+    echo
+    get_processes_by_mem_usage "$top_memory_processes"
     echo
 }
 
